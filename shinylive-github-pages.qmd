@@ -906,11 +906,11 @@ server <- function(input, output, session) {
     penalty_spot_att <- circle_function_heatmap(center = c(7,20), diameter = 0.2)
     penalty_spot_def <- circle_function_heatmap(center = c(53,20), diameter = 0.2)
     
-    custom_colours <- c("royalblue3", "dodgerblue2", "deepskyblue", "turquoise", "springgreen", "seagreen4", "green4")
+    colfunc <- colorRampPalette(c("#BCE4D8", "#2C5985"))
     
     heatmap_with_pitch <- ggplot(football_heatmap, aes(x_shot_location, y_shot_location)) +
       geom_tile(aes(fill=`Conversion rate`, text = paste0("Conversion rate: ", `Conversion rate`, "%", "\nGoals: ", goals, "\nShots: ", shots)), size = 3) +
-      scale_fill_gradientn(colors = custom_colours) +
+      scale_fill_gradientn(colors = colfunc(30)) +
       theme_classic() +
       theme(panel.background = element_rect(fill = 'black'),
             axis.line = element_blank(),
