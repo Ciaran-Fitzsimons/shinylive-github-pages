@@ -2,8 +2,7 @@
 title: "shinylive-github-pages"
 format:
   html: 
-    grid:
-      body-width: 1400px
+    page-layout: full
     resources: 
       - shinylive-sw.js
 filters:
