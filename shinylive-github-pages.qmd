@@ -857,18 +857,28 @@ server <- function(input, output, session) {
     shot_heatmap_data$Outcome <- ifelse(shot_heatmap_data$Outcome == 'Goal', 1, 0)
     
     shot_heatmap_data <- shot_heatmap_data %>%
-      mutate(y_shot_location = ifelse(y_shot_location >= 0 & y_shot_location <= 10, 5,
-                                      ifelse(y_shot_location > 10 & y_shot_location <= 20, 15,
-                                             ifelse(y_shot_location > 20 & y_shot_location <= 30, 25,
-                                                    ifelse(y_shot_location > 30 & y_shot_location <= 40, 35, y_shot_location)))))
+      mutate(y_shot_location = ifelse(y_shot_location >= 0 & y_shot_location <= 5, 2.5,
+                                      ifelse(y_shot_location > 5 & y_shot_location <= 10, 7.5,
+                                             ifelse(y_shot_location > 10 & y_shot_location <= 15, 12.5,
+                                                    ifelse(y_shot_location > 15 & y_shot_location <= 20, 17.5,
+                                                           ifelse(y_shot_location > 20 & y_shot_location <= 25, 22.5,
+                                                                  ifelse(y_shot_location > 25 & y_shot_location <= 30, 27.5,
+                                                                         ifelse(y_shot_location > 30 & y_shot_location <= 35, 32.5,
+                                                                                ifelse(y_shot_location > 35 & y_shot_location <= 40, 37.5, y_shot_location)))))))))
     
     shot_heatmap_data <- shot_heatmap_data %>%
-      mutate(x_shot_location = ifelse(x_shot_location >= 0 & x_shot_location <= 10, 5,
-                                      ifelse(x_shot_location > 10 & x_shot_location <= 20, 15,
-                                             ifelse(x_shot_location > 20 & x_shot_location <= 30, 25,
-                                                    ifelse(x_shot_location > 30 & x_shot_location <= 40, 35,
-                                                           ifelse(x_shot_location > 40 & x_shot_location <= 50, 45,
-                                                                  ifelse(x_shot_location > 50 & x_shot_location <= 60, 55, x_shot_location)))))))
+      mutate(x_shot_location = ifelse(x_shot_location >= 0 & x_shot_location <= 5, 2.5,
+                                      ifelse(x_shot_location > 5 & x_shot_location <= 10, 7.5,
+                                             ifelse(x_shot_location > 10 & x_shot_location <= 15, 12.5,
+                                                    ifelse(x_shot_location > 15 & x_shot_location <= 20, 17.5,
+                                                           ifelse(x_shot_location > 20 & x_shot_location <= 25, 22.5,
+                                                                  ifelse(x_shot_location > 25 & x_shot_location <= 30, 27.5,
+                                                                         ifelse(x_shot_location >= 30 & x_shot_location <= 35, 32.5,
+                                                                                ifelse(x_shot_location > 35 & x_shot_location <= 40, 37.5,
+                                                                                       ifelse(x_shot_location > 40 & x_shot_location <= 45, 42.5,
+                                                                                              ifelse(x_shot_location > 45 & x_shot_location <= 50, 47.5,
+                                                                                                     ifelse(x_shot_location > 50 & x_shot_location <= 55, 52.5,
+                                                                                                            ifelse(x_shot_location > 55 & x_shot_location <= 60, 57.5, x_shot_location)))))))))))))
     
     goals_heatmap <- shot_heatmap_data %>%
       group_by(x_shot_location, y_shot_location) %>%
