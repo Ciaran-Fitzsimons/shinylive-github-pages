@@ -469,7 +469,7 @@ server <- function(input, output, session) {
     match_stats <- read_excel(input$file$datapath, sheet = 2)
     shot_data <- shot_data %>% inner_join(match_stats, by = "Week")
     
-    updateSliderInput(session, "week", max = max(shot_data$Week), value = c(1, length(unique(shot_data$Week))))
+    updateSliderInput(session, "week", max = max(shot_data$Week), value = c(1, max(shot_data$Week)))
     updateSelectInput(session, "outcome", choices = c("All", unique(shot_data$Outcome_filter)))
     updateSelectInput(session, "foot", choices = c("Either", unique(shot_data$Foot)))
     updateSelectInput(session, "type", choices = c("All", unique(shot_data$Type)))
