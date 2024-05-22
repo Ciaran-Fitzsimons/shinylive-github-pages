@@ -2,7 +2,7 @@
 <html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en"><head>
 
 <meta charset="utf-8">
-<meta name="generator" content="quarto-1.2.335">
+<meta name="generator" content="quarto-1.4.553">
 
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
 
@@ -17,7 +17,7 @@ div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
 ul.task-list{list-style: none;}
 ul.task-list li input[type="checkbox"] {
   width: 0.8em;
-  margin: 0 0.8em 0.2em -1.6em;
+  margin: 0 0.8em 0.2em -1em; /* quarto-specific, see https://github.com/quarto-dev/quarto-cli/issues/4556 */ 
   vertical-align: middle;
 }
 </style>
@@ -49,7 +49,13 @@ ul.task-list li input[type="checkbox"] {
   "collapse-after": 3,
   "panel-placement": "start",
   "type": "textbox",
-  "limit": 20,
+  "limit": 50,
+  "keyboard-shortcut": [
+    "f",
+    "/",
+    "s"
+  ],
+  "show-item-context": false,
   "language": {
     "search-no-results-text": "No results",
     "search-matching-documents-text": "matching documents",
@@ -58,8 +64,10 @@ ul.task-list li input[type="checkbox"] {
     "search-more-match-text": "more match in this document",
     "search-more-matches-text": "more matches in this document",
     "search-clear-button-title": "Clear",
+    "search-text-placeholder": "",
     "search-detached-cancel-button-title": "Cancel",
-    "search-submit-button-title": "Submit"
+    "search-submit-button-title": "Submit",
+    "search-label": "Search"
   }
 }</script>
 
@@ -84,7 +92,7 @@ ul.task-list li input[type="checkbox"] {
 
 
 
-<div class="quarto-title-meta">
+<div class="quarto-title-meta column-page">
 
     
   
@@ -92,16 +100,20 @@ ul.task-list li input[type="checkbox"] {
   </div>
   
 
+
 </header>
+
 
 <pre class="shinylive-r" data-engine="r"><code>#| standalone: true
 #| viewerHeight: 600
 library(shiny)
+library(shinyWidgets)
 library(plotly)
 library(tidyverse)
 library(readxl)
 library(scales)
 library(ggplot2)
+library(openxlsx)
 
 ui &lt;- fluidPage(
   tags$style(
@@ -124,6 +136,8 @@ ui &lt;- fluidPage(
       # Input: load in data
       fileInput(inputId = "file",
                 label = "Upload your shot data"),
+      # Downloading a sample file to be used in the app
+      downloadButton("download_sample_data", "Download sample data")
     ),
     tabPanel("Shot map",
   
@@ -178,11 +192,6 @@ ui &lt;- fluidPage(
                       value = c(1, 1),
                       step = 1),
           
-          # Checbox: if checked, then blocked shots are excluded from plot
-          checkboxInput(inputId = "excludeBlocked",
-                        label = "Exclude Blocked Shots",
-                        value = TRUE),
-          
           # Button that resets all inputs to their default
           actionButton("resetButton", "Clear selections")
         ),
@@ -224,11 +233,12 @@ ui &lt;- fluidPage(
                  column(width = 6,
                         #Output: Breakdown of shots based on how many aside ----
                         tags$h2("Stats based on how many aside"),
-                        selectizeInput(inputId = "aside_for_calculations",
-                                       label = "Select how many players there were aside",
-                                       c("Any"),
-                                       selected = "Any",
-                                       multiple = TRUE),
+                        pickerInput(inputId = "aside_for_calculations",
+                                    label = "Select how many players there were aside",
+                                    choices = c("Any"),
+                                    selected = "Any",
+                                    multiple = TRUE,
+                                    options = pickerOptions(actionsBox = TRUE, selectedTextFormat = "count", liveSearch = T)),
                         div(class = "output-wrapper",
                             h4("Goals per game:"),
                             div(textOutput("goals_per_game_based_on_aside"))),
@@ -492,96 +502,114 @@ server &lt;- function(input, output, session) {
   }
 
   
+  # Downloading a sample file to be used in the app
+  output$download_sample_data &lt;- downloadHandler(
+    filename = function() {
+      "Ciaran_shot_data.xlsx"
+    },
+    
+    content = function(file) {
+      # Read both sheets from the sample file
+      sheet1 &lt;- read_excel("Ciaran_shot_data.xlsx", sheet = 1)
+      sheet2 &lt;- read_excel("Ciaran_shot_data.xlsx", sheet = 2)
+      
+      # Create a new workbook and add the sheets
+      wb &lt;- createWorkbook()
+      addWorksheet(wb, "Sheet1")
+      writeData(wb, "Sheet1", sheet1)
+      addWorksheet(wb, "Sheet2")
+      writeData(wb, "Sheet2", sheet2)
+      
+      # Save the workbook to the specified file
+      saveWorkbook(wb, file, overwrite = TRUE)
+    }
+  )
+  
   #### First tab ----
   filtered_data &lt;- reactive({
-    req(input$file)
     
-    shot_data &lt;- read_excel(input$file$datapath, sheet = 1)
-    shot_data &lt;- shot_data %&gt;% separate(Location, into = c("x_shot_location", "y_shot_location"), sep = ", ", convert = T) %&gt;%
-      separate("End location", into = c("x_end_location", "y_end_location"), sep = ", ", convert = T)
-    shot_data$Outcome_filter &lt;- ifelse(shot_data$Outcome == 'Goal', 'Goal', 'No goal')
-    shot_data$Outcome_colour &lt;- ifelse(shot_data$Outcome == 'Goal', 'Goal',
-                                       ifelse(shot_data$Outcome == 'Blocked', 'Blocked', 'No goal'))
-    
-    match_stats &lt;- read_excel(input$file$datapath, sheet = 2)
-    shot_data &lt;- shot_data %&gt;% inner_join(match_stats, by = "Week")
-    filtered_data &lt;- shot_data
-    
-    if (input$excludeBlocked) {
-      filtered_data &lt;- filtered_data %&gt;% filter(Outcome != "Blocked")
+    if(!is.null(input$file)) {
+      shot_data &lt;- read_excel(input$file$datapath, sheet = 1)
+      shot_data &lt;- shot_data %&gt;% separate(Location, into = c("x_shot_location", "y_shot_location"), sep = ", ", convert = T) %&gt;%
+        separate("End location", into = c("x_end_location", "y_end_location"), sep = ", ", convert = T)
+      shot_data$Outcome_filter &lt;- ifelse(shot_data$Outcome == 'Goal', 'Goal', 'No goal')
+      match_stats &lt;- read_excel(input$file$datapath, sheet = 2)
+      shot_data &lt;- shot_data %&gt;% inner_join(match_stats, by = "Week")
+      filtered_data &lt;- shot_data
+      
+      selected_weeks &lt;- input$week[1]:input$week[2]
+      filtered_data &lt;- filtered_data[filtered_data$Week %in% selected_weeks, ]
+      
+      if (input$outcome != "All") {
+        filtered_data &lt;- filtered_data[filtered_data$Outcome_filter == input$outcome, ]
+      }
+      
+      if (input$foot != "Either") {
+        filtered_data &lt;- filtered_data[filtered_data$Foot == input$foot, ]
+      }
+      
+      if (input$type != "All") {
+        filtered_data &lt;- filtered_data[filtered_data$Type == input$type, ]
+      }
+      
+      if (input$first_time != "Either") {
+        filtered_data &lt;- filtered_data[filtered_data$`First time` == input$first_time, ]
+      }
+      
+      if (input$team != "Either") {
+        filtered_data &lt;- filtered_data[filtered_data$Team == input$team, ]
+      }
+      
+      if (input$result != "Any") {
+        filtered_data &lt;- filtered_data[filtered_data$`Team result` == input$result, ]
+      }
+      
+      aside &lt;- input$aside[1]:input$aside[2]
+      filtered_data &lt;- filtered_data[filtered_data$`How many aside` %in% aside, ]
+      
+      return(filtered_data)
     }
-    
-    selected_weeks &lt;- input$week[1]:input$week[2]
-    filtered_data &lt;- filtered_data[filtered_data$Week %in% selected_weeks, ]
-    
-    if (input$outcome != "All") {
-      filtered_data &lt;- filtered_data[filtered_data$Outcome_filter == input$outcome, ]
-    }
-    
-    if (input$foot != "Either") {
-      filtered_data &lt;- filtered_data[filtered_data$Foot == input$foot, ]
-    }
-    
-    if (input$type != "All") {
-      filtered_data &lt;- filtered_data[filtered_data$Type == input$type, ]
-    }
-
-    if (input$first_time != "Either") {
-      filtered_data &lt;- filtered_data[filtered_data$`First time` == input$first_time, ]
-    }
-
-    if (input$team != "Either") {
-      filtered_data &lt;- filtered_data[filtered_data$Team == input$team, ]
-    }
-
-    if (input$result != "Any") {
-      filtered_data &lt;- filtered_data[filtered_data$`Team result` == input$result, ]
-    }
-
-    aside &lt;- input$aside[1]:input$aside[2]
-    filtered_data &lt;- filtered_data[filtered_data$`How many aside` %in% aside, ]
-    
-    return(filtered_data)
   })
   
   # Updating ui (e.g. sliders &amp; select input values)
   observe({
-    req(input$file)
     
-    shot_data &lt;- read_excel(input$file$datapath, sheet = 1)
-    shot_data$Outcome_filter &lt;- ifelse(shot_data$Outcome == 'Goal', 'Goal', 'No goal')
-    match_stats &lt;- read_excel(input$file$datapath, sheet = 2)
-    shot_data &lt;- shot_data %&gt;% inner_join(match_stats, by = "Week")
-    
-    updateSliderInput(session, "week", max = max(shot_data$Week), value = c(1, length(unique(shot_data$Week))))
-    updateSelectInput(session, "outcome", choices = c("All", unique(shot_data$Outcome_filter)))
-    updateSelectInput(session, "foot", choices = c("Either", unique(shot_data$Foot)))
-    updateSelectInput(session, "type", choices = c("All", unique(shot_data$Type)))
-    updateSelectInput(session, "first_time", choices = c("Either", unique(shot_data$`First time`)))
-    updateSelectInput(session, "team", choices = c("Either", unique(shot_data$Team)))
-    updateSelectInput(session, "result", choices = c("Any", unique(shot_data$`Team result`)))
-    updateSliderInput(session, "aside", min = min(shot_data$`How many aside`), max = max(shot_data$`How many aside`), value = c(min(shot_data$`How many aside`), max(shot_data$`How many aside`)))
-  })
-  
-  # Define a function to reset inputs to default values
-  resetInputs &lt;- function() {
-    observe({
-      req(input$file)
-      
+    if(!is.null(input$file)) {
       shot_data &lt;- read_excel(input$file$datapath, sheet = 1)
       shot_data$Outcome_filter &lt;- ifelse(shot_data$Outcome == 'Goal', 'Goal', 'No goal')
       match_stats &lt;- read_excel(input$file$datapath, sheet = 2)
       shot_data &lt;- shot_data %&gt;% inner_join(match_stats, by = "Week")
       
-      updateSliderInput(session, "week", value = c(1, length(unique(shot_data$Week))))
-      updateSelectInput(session, "outcome", selected = "All")
-      updateSelectInput(session, "foot", selected = "Either")
-      updateSelectInput(session, "type", selected = "All")
-      updateSelectInput(session, "first_time", selected = "Either")
-      updateSelectInput(session, "team", selected = "Either")
-      updateSelectInput(session, "result", selected = "Any")
-      updateSliderInput(session, "aside", value = c(min(shot_data$`How many aside`), max(shot_data$`How many aside`)))
-      updateCheckboxInput(session, "excludeBlocked", value = TRUE)
+      updateSliderInput(session, "week", max = max(shot_data$Week), value = c(1, max(shot_data$Week)))
+      updateSelectInput(session, "outcome", choices = c("All", unique(shot_data$Outcome_filter)))
+      updateSelectInput(session, "foot", choices = c("Either", unique(shot_data$Foot)))
+      updateSelectInput(session, "type", choices = c("All", unique(shot_data$Type)))
+      updateSelectInput(session, "first_time", choices = c("Either", unique(shot_data$`First time`)))
+      updateSelectInput(session, "team", choices = c("Either", unique(shot_data$Team)))
+      updateSelectInput(session, "result", choices = c("Any", unique(shot_data$`Team result`)))
+      updateSliderInput(session, "aside", min = min(shot_data$`How many aside`), max = max(shot_data$`How many aside`), value = c(min(shot_data$`How many aside`), max(shot_data$`How many aside`)))
+    }
+  })
+  
+  # Define a function to reset inputs to default values
+  resetInputs &lt;- function() {
+    observe({
+      
+      if(!is.null(input$file)) {
+        shot_data &lt;- read_excel(input$file$datapath, sheet = 1)
+        shot_data$Outcome_filter &lt;- ifelse(shot_data$Outcome == 'Goal', 'Goal', 'No goal')
+        match_stats &lt;- read_excel(input$file$datapath, sheet = 2)
+        shot_data &lt;- shot_data %&gt;% inner_join(match_stats, by = "Week")
+        
+        updateSliderInput(session, "week", max = max(shot_data$Week), value = c(1, max(shot_data$Week)))
+        updateSelectInput(session, "outcome", selected = "All")
+        updateSelectInput(session, "foot", selected = "Either")
+        updateSelectInput(session, "type", selected = "All")
+        updateSelectInput(session, "first_time", selected = "Either")
+        updateSelectInput(session, "team", selected = "Either")
+        updateSelectInput(session, "result", selected = "Any")
+        updateSliderInput(session, "aside", value = c(min(shot_data$`How many aside`), max(shot_data$`How many aside`)))
+      }
     })
   }
   
@@ -598,7 +626,7 @@ server &lt;- function(input, output, session) {
       return(NULL)
     }
     
-    shot_data %&gt;% select(-c(x_shot_location, y_shot_location, x_end_location, y_end_location, Outcome_filter, Outcome_colour))
+    shot_data %&gt;% select(-c(x_shot_location, y_shot_location, x_end_location, y_end_location, Outcome_filter))
   }, options = list(lengthMenu = c(10, 25, 50), pageLength = 50))
     
   output$shotPlot &lt;- renderPlotly({
@@ -611,9 +639,9 @@ server &lt;- function(input, output, session) {
     shot_data$WrappedDescription &lt;- str_wrap(shot_data$Description, width = 40)
     
     shot_plot &lt;- hori5 +
-      geom_point(data = shot_data, aes(x = x_shot_location, y = y_shot_location, color = Outcome_colour,
+      geom_point(data = shot_data, aes(x = x_shot_location, y = y_shot_location, color = Outcome_filter,
                                        text = paste("Week:", Week, "\nFoot used:", Foot, "\nType of shot:", Type, "\nDescription:", WrappedDescription)), size = 3) +
-      geom_segment(data = shot_data, aes(xend = x_end_location, yend = y_end_location, x = x_shot_location, y = y_shot_location, color = Outcome_colour),
+      geom_segment(data = shot_data, aes(xend = x_end_location, yend = y_end_location, x = x_shot_location, y = y_shot_location, color = Outcome_filter),
                    arrow = arrow(type = "closed", length = unit(0.2, "inches")), lineend = "round", size = 0.2) +
       guides(color = "none") +
       scale_color_manual(values = c('No goal' = "#FF0000", Goal = "#008B45"))
@@ -624,33 +652,34 @@ server &lt;- function(input, output, session) {
   #### Tables and numbers in second tab ----
   ### Updating ui (e.g. sliders &amp; select input values)
   observe({
-    req(input$file)
     
-    shot_data &lt;- read_excel(input$file$datapath, sheet = 1)
-    shot_data &lt;- shot_data %&gt;% separate(Location, into = c("x_shot_location", "y_shot_location"), sep = ", ", convert = T) %&gt;%
-      separate("End location", into = c("x_end_location", "y_end_location"), sep = ", ", convert = T)
-    shot_data$Outcome_filter &lt;- ifelse(shot_data$Outcome == 'Goal', 'Goal', 'No goal')
-    shot_data$Outcome_colour &lt;- ifelse(shot_data$Outcome == 'Goal', 'Goal',
-                                       ifelse(shot_data$Outcome == 'Blocked', 'Blocked', 'No goal'))
-    match_stats &lt;- read_excel(input$file$datapath, sheet = 2)
-    shot_data &lt;- shot_data %&gt;% inner_join(match_stats, by = "Week")
-    how_many_aside_sorted &lt;- sort(unique(match_stats$`How many aside`))
-    
-    updateSelectInput(session, "aside_for_calculations", choices = c("Any", how_many_aside_sorted), selected = "Any")
-    updateSelectInput(session, "result_for_calculations", choices = c("Any", unique(match_stats$`Team result`)))
+    if(!is.null(input$file)) {
+      shot_data &lt;- read_excel(input$file$datapath, sheet = 1)
+      shot_data &lt;- shot_data %&gt;% separate(Location, into = c("x_shot_location", "y_shot_location"), sep = ", ", convert = T) %&gt;%
+        separate("End location", into = c("x_end_location", "y_end_location"), sep = ", ", convert = T)
+      shot_data$Outcome_filter &lt;- ifelse(shot_data$Outcome == 'Goal', 'Goal', 'No goal')
+      match_stats &lt;- read_excel(input$file$datapath, sheet = 2)
+      shot_data &lt;- shot_data %&gt;% inner_join(match_stats, by = "Week")
+      how_many_aside_sorted &lt;- sort(unique(match_stats$`How many aside`))
+      
+      updatePickerInput(session, "aside_for_calculations", choices = how_many_aside_sorted, selected = how_many_aside_sorted)
+      updateSelectInput(session, "result_for_calculations", choices = c("Any", unique(match_stats$`Team result`)))
+    }
   })
   
   ### Based on teams result
   ## For filters using match stats
   match_stats_calculations &lt;- reactive({
-    req(input$file)
-    match_stats &lt;- read_excel(input$file$datapath, sheet = 2)
-    req(input$result_for_calculations)
-    if (input$result_for_calculations != "Any") {
-      filtered_stats &lt;- match_stats[match_stats$`Team result` == input$result_for_calculations, ]
-      return(filtered_stats)
-    } else {
-      return(match_stats)
+    
+    if(!is.null(input$file)) {
+      match_stats &lt;- read_excel(input$file$datapath, sheet = 2)
+      req(input$result_for_calculations)
+      if (input$result_for_calculations != "Any") {
+        filtered_stats &lt;- match_stats[match_stats$`Team result` == input$result_for_calculations, ]
+        return(filtered_stats)
+      } else {
+        return(match_stats)
+      }
     }
   })
   
@@ -684,42 +713,40 @@ server &lt;- function(input, output, session) {
   ## For filters using shot and goal stats
   # Shot stats
   shot_stats_calculations &lt;- reactive({
-    req(input$file)
-    shot_data &lt;- read_excel(input$file$datapath, sheet = 1)
-    shot_data &lt;- shot_data %&gt;% separate(Location, into = c("x_shot_location", "y_shot_location"), sep = ", ", convert = T) %&gt;%
-      separate("End location", into = c("x_end_location", "y_end_location"), sep = ", ", convert = T)
-    shot_data$Outcome_filter &lt;- ifelse(shot_data$Outcome == 'Goal', 'Goal', 'No goal')
-    shot_data$Outcome_colour &lt;- ifelse(shot_data$Outcome == 'Goal', 'Goal',
-                                       ifelse(shot_data$Outcome == 'Blocked', 'Blocked', 'No goal'))
-    match_stats &lt;- read_excel(input$file$datapath, sheet = 2)
-    shot_data &lt;- shot_data %&gt;% inner_join(match_stats, by = "Week")
-    req(input$result_for_calculations)
-    if (input$result_for_calculations != "Any") {
-      filtered_shot_stats &lt;- shot_data[shot_data$`Team result` == input$result_for_calculations, ]
-      return(filtered_shot_stats)
-    } else {
-      return(shot_data)
+    if(!is.null(input$file)) {
+      shot_data &lt;- read_excel(input$file$datapath, sheet = 1)
+      shot_data &lt;- shot_data %&gt;% separate(Location, into = c("x_shot_location", "y_shot_location"), sep = ", ", convert = T) %&gt;%
+        separate("End location", into = c("x_end_location", "y_end_location"), sep = ", ", convert = T)
+      shot_data$Outcome_filter &lt;- ifelse(shot_data$Outcome == 'Goal', 'Goal', 'No goal')
+      match_stats &lt;- read_excel(input$file$datapath, sheet = 2)
+      shot_data &lt;- shot_data %&gt;% inner_join(match_stats, by = "Week")
+      req(input$result_for_calculations)
+      if (input$result_for_calculations != "Any") {
+        filtered_shot_stats &lt;- shot_data[shot_data$`Team result` == input$result_for_calculations, ]
+        return(filtered_shot_stats)
+      } else {
+        return(shot_data)
+      }
     }
   })
   
   # Goal stats
   goal_stats_calculations &lt;- reactive({
-    req(input$file)
-    shot_data &lt;- read_excel(input$file$datapath, sheet = 1)
-    shot_data &lt;- shot_data %&gt;% separate(Location, into = c("x_shot_location", "y_shot_location"), sep = ", ", convert = T) %&gt;%
-      separate("End location", into = c("x_end_location", "y_end_location"), sep = ", ", convert = T)
-    shot_data$Outcome_filter &lt;- ifelse(shot_data$Outcome == 'Goal', 'Goal', 'No goal')
-    shot_data$Outcome_colour &lt;- ifelse(shot_data$Outcome == 'Goal', 'Goal',
-                                       ifelse(shot_data$Outcome == 'Blocked', 'Blocked', 'No goal'))
-    match_stats &lt;- read_excel(input$file$datapath, sheet = 2)
-    shot_data &lt;- shot_data %&gt;% inner_join(match_stats, by = "Week")
-    goal_data &lt;- shot_data %&gt;% filter(Outcome == "Goal")
-    req(input$result_for_calculations)
-    if (input$result_for_calculations != "Any") {
-      filtered_goal_stats &lt;- goal_data[goal_data$`Team result` == input$result_for_calculations, ]
-      return(filtered_goal_stats)
-    } else {
-      return(goal_data)
+    if(!is.null(input$file)) {
+      shot_data &lt;- read_excel(input$file$datapath, sheet = 1)
+      shot_data &lt;- shot_data %&gt;% separate(Location, into = c("x_shot_location", "y_shot_location"), sep = ", ", convert = T) %&gt;%
+        separate("End location", into = c("x_end_location", "y_end_location"), sep = ", ", convert = T)
+      shot_data$Outcome_filter &lt;- ifelse(shot_data$Outcome == 'Goal', 'Goal', 'No goal')
+      match_stats &lt;- read_excel(input$file$datapath, sheet = 2)
+      shot_data &lt;- shot_data %&gt;% inner_join(match_stats, by = "Week")
+      goal_data &lt;- shot_data %&gt;% filter(Outcome == "Goal")
+      req(input$result_for_calculations)
+      if (input$result_for_calculations != "Any") {
+        filtered_goal_stats &lt;- goal_data[goal_data$`Team result` == input$result_for_calculations, ]
+        return(filtered_goal_stats)
+      } else {
+        return(goal_data)
+      }
     }
   })
   
@@ -781,15 +808,16 @@ server &lt;- function(input, output, session) {
   ### Based on how many aside
   ## For filters using match stats
   match_stats_calculations_aside &lt;- reactive({
-    req(input$file)
-    match_stats &lt;- read_excel(input$file$datapath, sheet = 2)
-    req(input$aside_for_calculations)
-    if (input$aside_for_calculations != "Any") {
-      filtered_stats_aside &lt;- match_stats[match_stats$`How many aside` %in% input$aside_for_calculations, ]
-    } else {
-      filtered_stats_aside &lt;- match_stats
+    if(!is.null(input$file)) {
+      match_stats &lt;- read_excel(input$file$datapath, sheet = 2)
+      req(input$aside_for_calculations)
+      if ("Any" %in% input$aside_for_calculations) {
+        filtered_stats_aside &lt;- match_stats
+      } else {
+        filtered_stats_aside &lt;- match_stats[match_stats$`How many aside` %in% input$aside_for_calculations, ]
+      }
+      return(filtered_stats_aside)
     }
-    return(filtered_stats_aside)
   })
   
   # Goals per game
@@ -822,42 +850,40 @@ server &lt;- function(input, output, session) {
   ## For filters using shot and goal stats
   # Shot stats
   shot_stats_calculations_aside &lt;- reactive({
-    req(input$file)
-    shot_data &lt;- read_excel(input$file$datapath, sheet = 1)
-    shot_data &lt;- shot_data %&gt;% separate(Location, into = c("x_shot_location", "y_shot_location"), sep = ", ", convert = T) %&gt;%
-      separate("End location", into = c("x_end_location", "y_end_location"), sep = ", ", convert = T)
-    shot_data$Outcome_filter &lt;- ifelse(shot_data$Outcome == 'Goal', 'Goal', 'No goal')
-    shot_data$Outcome_colour &lt;- ifelse(shot_data$Outcome == 'Goal', 'Goal',
-                                       ifelse(shot_data$Outcome == 'Blocked', 'Blocked', 'No goal'))
-    match_stats &lt;- read_excel(input$file$datapath, sheet = 2)
-    shot_data &lt;- shot_data %&gt;% inner_join(match_stats, by = "Week")
-    req(input$aside_for_calculations)
-    if (input$aside_for_calculations != "Any") {
-      filtered_shot_stats_aside &lt;- shot_data[shot_data$`How many aside` %in% input$aside_for_calculations, ]
-      return(filtered_shot_stats_aside)
-    } else {
-      return(shot_data)
+    if(!is.null(input$file)) {
+      shot_data &lt;- read_excel(input$file$datapath, sheet = 1)
+      shot_data &lt;- shot_data %&gt;% separate(Location, into = c("x_shot_location", "y_shot_location"), sep = ", ", convert = T) %&gt;%
+        separate("End location", into = c("x_end_location", "y_end_location"), sep = ", ", convert = T)
+      shot_data$Outcome_filter &lt;- ifelse(shot_data$Outcome == 'Goal', 'Goal', 'No goal')
+      match_stats &lt;- read_excel(input$file$datapath, sheet = 2)
+      shot_data &lt;- shot_data %&gt;% inner_join(match_stats, by = "Week")
+      req(input$aside_for_calculations)
+      if ("Any" %in% input$aside_for_calculations) {
+        return(shot_data)
+      } else {
+        filtered_shot_stats_aside &lt;- shot_data[shot_data$`How many aside` %in% input$aside_for_calculations, ]
+        return(filtered_shot_stats_aside)
+      }
     }
   })
   
   # Goal stats
   goal_stats_calculations_aside &lt;- reactive({
-    req(input$file)
-    shot_data &lt;- read_excel(input$file$datapath, sheet = 1)
-    shot_data &lt;- shot_data %&gt;% separate(Location, into = c("x_shot_location", "y_shot_location"), sep = ", ", convert = T) %&gt;%
-      separate("End location", into = c("x_end_location", "y_end_location"), sep = ", ", convert = T)
-    shot_data$Outcome_filter &lt;- ifelse(shot_data$Outcome == 'Goal', 'Goal', 'No goal')
-    shot_data$Outcome_colour &lt;- ifelse(shot_data$Outcome == 'Goal', 'Goal',
-                                       ifelse(shot_data$Outcome == 'Blocked', 'Blocked', 'No goal'))
-    match_stats &lt;- read_excel(input$file$datapath, sheet = 2)
-    shot_data &lt;- shot_data %&gt;% inner_join(match_stats, by = "Week")
-    goal_data &lt;- shot_data %&gt;% filter(Outcome == "Goal")
-    req(input$aside_for_calculations)
-    if (input$aside_for_calculations != "Any") {
-      filtered_goal_stats_aside &lt;- goal_data[goal_data$`How many aside` %in% input$aside_for_calculations, ]
-      return(filtered_goal_stats_aside)
-    } else {
-      return(goal_data)
+    if(!is.null(input$file)) {
+      shot_data &lt;- read_excel(input$file$datapath, sheet = 1)
+      shot_data &lt;- shot_data %&gt;% separate(Location, into = c("x_shot_location", "y_shot_location"), sep = ", ", convert = T) %&gt;%
+        separate("End location", into = c("x_end_location", "y_end_location"), sep = ", ", convert = T)
+      shot_data$Outcome_filter &lt;- ifelse(shot_data$Outcome == 'Goal', 'Goal', 'No goal')
+      match_stats &lt;- read_excel(input$file$datapath, sheet = 2)
+      shot_data &lt;- shot_data %&gt;% inner_join(match_stats, by = "Week")
+      goal_data &lt;- shot_data %&gt;% filter(Outcome == "Goal")
+      req(input$aside_for_calculations)
+      if ("Any" %in% input$aside_for_calculations) {
+        return(goal_data)
+      } else {
+        filtered_goal_stats_aside &lt;- goal_data[goal_data$`How many aside` %in% input$aside_for_calculations, ]
+        return(filtered_goal_stats_aside)
+      }
     }
   })
   
@@ -918,54 +944,64 @@ server &lt;- function(input, output, session) {
   
   #### Table with full weekly stats ----
   weekly_stats &lt;- reactive({
-    req(input$file)
-    
-    match_stats &lt;- read_excel(input$file$datapath, sheet = 2)
-    
-    return(match_stats)
+    if(!is.null(input$file)) {
+      match_stats &lt;- read_excel(input$file$datapath, sheet = 2)
+      
+      return(match_stats)
+    }
   })
   
   output$stats_table &lt;- renderDataTable(
     weekly_stats(),
-    options = list(lengthMenu = c(10, 25, 50), pageLength = 10)
-  )
+    options=list(lengthMenu=list(c(20,-1),list('20','All')),
+               pageLength=20,dom='Bipt'))
   
   #### Heatmap ----
   heatmap_data &lt;- reactive({
-    req(input$file)
     
-    shot_heatmap_data &lt;- read_excel(input$file$datapath, sheet = 1) %&gt;%
-      select("Outcome", "Location") %&gt;%
-      separate(Location, into = c("x_shot_location", "y_shot_location"), sep = ", ", convert = T) %&gt;%
-      filter(Outcome != "Blocked")
-    shot_heatmap_data$Outcome &lt;- ifelse(shot_heatmap_data$Outcome == 'Goal', 1, 0)
-    
-    shot_heatmap_data &lt;- shot_heatmap_data %&gt;%
-      mutate(y_shot_location = ifelse(y_shot_location &gt;= 0 &amp; y_shot_location &lt;= 10, 5,
-                                      ifelse(y_shot_location &gt; 10 &amp; y_shot_location &lt;= 20, 15,
-                                             ifelse(y_shot_location &gt; 20 &amp; y_shot_location &lt;= 30, 25,
-                                                    ifelse(y_shot_location &gt; 30 &amp; y_shot_location &lt;= 40, 35, y_shot_location)))))
-    
-    shot_heatmap_data &lt;- shot_heatmap_data %&gt;%
-      mutate(x_shot_location = ifelse(x_shot_location &gt;= 0 &amp; x_shot_location &lt;= 10, 5,
-                                      ifelse(x_shot_location &gt; 10 &amp; x_shot_location &lt;= 20, 15,
-                                             ifelse(x_shot_location &gt; 20 &amp; x_shot_location &lt;= 30, 25,
-                                                    ifelse(x_shot_location &gt; 30 &amp; x_shot_location &lt;= 40, 35,
-                                                           ifelse(x_shot_location &gt; 40 &amp; x_shot_location &lt;= 50, 45,
-                                                                  ifelse(x_shot_location &gt; 50 &amp; x_shot_location &lt;= 60, 55, x_shot_location)))))))
-    
-    goals_heatmap &lt;- shot_heatmap_data %&gt;%
-      group_by(x_shot_location, y_shot_location) %&gt;%
-      summarise(goals = sum(Outcome))
-    
-    shots_heatmap &lt;- shot_heatmap_data %&gt;%
-      group_by(x_shot_location, y_shot_location) %&gt;%
-      summarise(shots = n())
-    
-    football_heatmap &lt;- left_join(goals_heatmap, shots_heatmap, by = c("x_shot_location", "y_shot_location"))
-    football_heatmap &lt;- football_heatmap %&gt;% mutate(`Conversion rate` = round((goals/shots)*100, 0))
-    
-    return(football_heatmap)
+    if(!is.null(input$file)) {
+      shot_heatmap_data &lt;- read_excel(input$file$datapath, sheet = 1) %&gt;%
+        select("Outcome", "Location") %&gt;%
+        separate(Location, into = c("x_shot_location", "y_shot_location"), sep = ", ", convert = T)
+      shot_heatmap_data$Outcome &lt;- ifelse(shot_heatmap_data$Outcome == 'Goal', 1, 0)
+      
+      shot_heatmap_data &lt;- shot_heatmap_data %&gt;%
+        mutate(y_shot_location = ifelse(y_shot_location &gt;= 0 &amp; y_shot_location &lt;= 5, 2.5,
+                                        ifelse(y_shot_location &gt; 5 &amp; y_shot_location &lt;= 10, 7.5,
+                                               ifelse(y_shot_location &gt; 10 &amp; y_shot_location &lt;= 15, 12.5,
+                                                      ifelse(y_shot_location &gt; 15 &amp; y_shot_location &lt;= 20, 17.5,
+                                                             ifelse(y_shot_location &gt; 20 &amp; y_shot_location &lt;= 25, 22.5,
+                                                                    ifelse(y_shot_location &gt; 25 &amp; y_shot_location &lt;= 30, 27.5,
+                                                                           ifelse(y_shot_location &gt; 30 &amp; y_shot_location &lt;= 35, 32.5,
+                                                                                  ifelse(y_shot_location &gt; 35 &amp; y_shot_location &lt;= 40, 37.5, y_shot_location)))))))))
+      
+      shot_heatmap_data &lt;- shot_heatmap_data %&gt;%
+        mutate(x_shot_location = ifelse(x_shot_location &gt;= 0 &amp; x_shot_location &lt;= 5, 2.5,
+                                        ifelse(x_shot_location &gt; 5 &amp; x_shot_location &lt;= 10, 7.5,
+                                               ifelse(x_shot_location &gt; 10 &amp; x_shot_location &lt;= 15, 12.5,
+                                                      ifelse(x_shot_location &gt; 15 &amp; x_shot_location &lt;= 20, 17.5,
+                                                             ifelse(x_shot_location &gt; 20 &amp; x_shot_location &lt;= 25, 22.5,
+                                                                    ifelse(x_shot_location &gt; 25 &amp; x_shot_location &lt;= 30, 27.5,
+                                                                           ifelse(x_shot_location &gt;= 30 &amp; x_shot_location &lt;= 35, 32.5,
+                                                                                  ifelse(x_shot_location &gt; 35 &amp; x_shot_location &lt;= 40, 37.5,
+                                                                                         ifelse(x_shot_location &gt; 40 &amp; x_shot_location &lt;= 45, 42.5,
+                                                                                                ifelse(x_shot_location &gt; 45 &amp; x_shot_location &lt;= 50, 47.5,
+                                                                                                       ifelse(x_shot_location &gt; 50 &amp; x_shot_location &lt;= 55, 52.5,
+                                                                                                              ifelse(x_shot_location &gt; 55 &amp; x_shot_location &lt;= 60, 57.5, x_shot_location)))))))))))))
+      
+      goals_heatmap &lt;- shot_heatmap_data %&gt;%
+        group_by(x_shot_location, y_shot_location) %&gt;%
+        summarise(goals = sum(Outcome))
+      
+      shots_heatmap &lt;- shot_heatmap_data %&gt;%
+        group_by(x_shot_location, y_shot_location) %&gt;%
+        summarise(shots = n())
+      
+      football_heatmap &lt;- left_join(goals_heatmap, shots_heatmap, by = c("x_shot_location", "y_shot_location"))
+      football_heatmap &lt;- football_heatmap %&gt;% mutate(`Conversion rate` = round((goals/shots)*100, 0))
+      
+      return(football_heatmap)
+    }
   })
   
   output$heatmap &lt;- renderPlotly({
@@ -1049,9 +1085,23 @@ window.document.addEventListener("DOMContentLoaded", function (event) {
     icon: icon
   };
   anchorJS.add('.anchored');
+  const isCodeAnnotation = (el) => {
+    for (const clz of el.classList) {
+      if (clz.startsWith('code-annotation-')) {                     
+        return true;
+      }
+    }
+    return false;
+  }
   const clipboard = new window.ClipboardJS('.code-copy-button', {
-    target: function(trigger) {
-      return trigger.previousElementSibling;
+    text: function(trigger) {
+      const codeEl = trigger.previousElementSibling.cloneNode(true);
+      for (const childEl of codeEl.children) {
+        if (isCodeAnnotation(childEl)) {
+          childEl.remove();
+        }
+      }
+      return codeEl.innerText;
     }
   });
   clipboard.on('success', function(e) {
@@ -1087,10 +1137,27 @@ window.document.addEventListener("DOMContentLoaded", function (event) {
     // clear code selection
     e.clearSelection();
   });
-  function tippyHover(el, contentFn) {
+    var localhostRegex = new RegExp(/^(?:http|https):\/\/localhost\:?[0-9]*\//);
+    var mailtoRegex = new RegExp(/^mailto:/);
+      var filterRegex = new RegExp('/' + window.location.host + '/');
+    var isInternal = (href) => {
+        return filterRegex.test(href) || localhostRegex.test(href) || mailtoRegex.test(href);
+    }
+    // Inspect non-navigation links and adorn them if external
+ 	var links = window.document.querySelectorAll('a[href]:not(.nav-link):not(.navbar-brand):not(.toc-action):not(.sidebar-link):not(.sidebar-item-toggle):not(.pagination-link):not(.no-external):not([aria-hidden]):not(.dropdown-item):not(.quarto-navigation-tool)');
+    for (var i=0; i<links.length; i++) {
+      const link = links[i];
+      if (!isInternal(link.href)) {
+        // undo the damage that might have been done by quarto-nav.js in the case of
+        // links that we want to consider external
+        if (link.dataset.originalHref !== undefined) {
+          link.href = link.dataset.originalHref;
+        }
+      }
+    }
+  function tippyHover(el, contentFn, onTriggerFn, onUntriggerFn) {
     const config = {
       allowHTML: true,
-      content: contentFn,
       maxWidth: 500,
       delay: 100,
       arrow: false,
@@ -1100,8 +1167,17 @@ window.document.addEventListener("DOMContentLoaded", function (event) {
       interactive: true,
       interactiveBorder: 10,
       theme: 'quarto',
-      placement: 'bottom-start'
+      placement: 'bottom-start',
     };
+    if (contentFn) {
+      config.content = contentFn;
+    }
+    if (onTriggerFn) {
+      config.onTrigger = onTriggerFn;
+    }
+    if (onUntriggerFn) {
+      config.onUntrigger = onUntriggerFn;
+    }
     window.tippy(el, config); 
   }
   const noterefs = window.document.querySelectorAll('a[role="doc-noteref"]');
@@ -1113,9 +1189,245 @@ window.document.addEventListener("DOMContentLoaded", function (event) {
       try { href = new URL(href).hash; } catch {}
       const id = href.replace(/^#\/?/, "");
       const note = window.document.getElementById(id);
-      return note.innerHTML;
+      if (note) {
+        return note.innerHTML;
+      } else {
+        return "";
+      }
     });
   }
+  const xrefs = window.document.querySelectorAll('a.quarto-xref');
+  const processXRef = (id, note) => {
+    // Strip column container classes
+    const stripColumnClz = (el) => {
+      el.classList.remove("page-full", "page-columns");
+      if (el.children) {
+        for (const child of el.children) {
+          stripColumnClz(child);
+        }
+      }
+    }
+    stripColumnClz(note)
+    if (id === null || id.startsWith('sec-')) {
+      // Special case sections, only their first couple elements
+      const container = document.createElement("div");
+      if (note.children && note.children.length > 2) {
+        container.appendChild(note.children[0].cloneNode(true));
+        for (let i = 1; i < note.children.length; i++) {
+          const child = note.children[i];
+          if (child.tagName === "P" && child.innerText === "") {
+            continue;
+          } else {
+            container.appendChild(child.cloneNode(true));
+            break;
+          }
+        }
+        if (window.Quarto?.typesetMath) {
+          window.Quarto.typesetMath(container);
+        }
+        return container.innerHTML
+      } else {
+        if (window.Quarto?.typesetMath) {
+          window.Quarto.typesetMath(note);
+        }
+        return note.innerHTML;
+      }
+    } else {
+      // Remove any anchor links if they are present
+      const anchorLink = note.querySelector('a.anchorjs-link');
+      if (anchorLink) {
+        anchorLink.remove();
+      }
+      if (window.Quarto?.typesetMath) {
+        window.Quarto.typesetMath(note);
+      }
+      // TODO in 1.5, we should make sure this works without a callout special case
+      if (note.classList.contains("callout")) {
+        return note.outerHTML;
+      } else {
+        return note.innerHTML;
+      }
+    }
+  }
+  for (var i=0; i<xrefs.length; i++) {
+    const xref = xrefs[i];
+    tippyHover(xref, undefined, function(instance) {
+      instance.disable();
+      let url = xref.getAttribute('href');
+      let hash = undefined; 
+      if (url.startsWith('#')) {
+        hash = url;
+      } else {
+        try { hash = new URL(url).hash; } catch {}
+      }
+      if (hash) {
+        const id = hash.replace(/^#\/?/, "");
+        const note = window.document.getElementById(id);
+        if (note !== null) {
+          try {
+            const html = processXRef(id, note.cloneNode(true));
+            instance.setContent(html);
+          } finally {
+            instance.enable();
+            instance.show();
+          }
+        } else {
+          // See if we can fetch this
+          fetch(url.split('#')[0])
+          .then(res => res.text())
+          .then(html => {
+            const parser = new DOMParser();
+            const htmlDoc = parser.parseFromString(html, "text/html");
+            const note = htmlDoc.getElementById(id);
+            if (note !== null) {
+              const html = processXRef(id, note);
+              instance.setContent(html);
+            } 
+          }).finally(() => {
+            instance.enable();
+            instance.show();
+          });
+        }
+      } else {
+        // See if we can fetch a full url (with no hash to target)
+        // This is a special case and we should probably do some content thinning / targeting
+        fetch(url)
+        .then(res => res.text())
+        .then(html => {
+          const parser = new DOMParser();
+          const htmlDoc = parser.parseFromString(html, "text/html");
+          const note = htmlDoc.querySelector('main.content');
+          if (note !== null) {
+            // This should only happen for chapter cross references
+            // (since there is no id in the URL)
+            // remove the first header
+            if (note.children.length > 0 && note.children[0].tagName === "HEADER") {
+              note.children[0].remove();
+            }
+            const html = processXRef(null, note);
+            instance.setContent(html);
+          } 
+        }).finally(() => {
+          instance.enable();
+          instance.show();
+        });
+      }
+    }, function(instance) {
+    });
+  }
+      let selectedAnnoteEl;
+      const selectorForAnnotation = ( cell, annotation) => {
+        let cellAttr = 'data-code-cell="' + cell + '"';
+        let lineAttr = 'data-code-annotation="' +  annotation + '"';
+        const selector = 'span[' + cellAttr + '][' + lineAttr + ']';
+        return selector;
+      }
+      const selectCodeLines = (annoteEl) => {
+        const doc = window.document;
+        const targetCell = annoteEl.getAttribute("data-target-cell");
+        const targetAnnotation = annoteEl.getAttribute("data-target-annotation");
+        const annoteSpan = window.document.querySelector(selectorForAnnotation(targetCell, targetAnnotation));
+        const lines = annoteSpan.getAttribute("data-code-lines").split(",");
+        const lineIds = lines.map((line) => {
+          return targetCell + "-" + line;
+        })
+        let top = null;
+        let height = null;
+        let parent = null;
+        if (lineIds.length > 0) {
+            //compute the position of the single el (top and bottom and make a div)
+            const el = window.document.getElementById(lineIds[0]);
+            top = el.offsetTop;
+            height = el.offsetHeight;
+            parent = el.parentElement.parentElement;
+          if (lineIds.length > 1) {
+            const lastEl = window.document.getElementById(lineIds[lineIds.length - 1]);
+            const bottom = lastEl.offsetTop + lastEl.offsetHeight;
+            height = bottom - top;
+          }
+          if (top !== null && height !== null && parent !== null) {
+            // cook up a div (if necessary) and position it 
+            let div = window.document.getElementById("code-annotation-line-highlight");
+            if (div === null) {
+              div = window.document.createElement("div");
+              div.setAttribute("id", "code-annotation-line-highlight");
+              div.style.position = 'absolute';
+              parent.appendChild(div);
+            }
+            div.style.top = top - 2 + "px";
+            div.style.height = height + 4 + "px";
+            div.style.left = 0;
+            let gutterDiv = window.document.getElementById("code-annotation-line-highlight-gutter");
+            if (gutterDiv === null) {
+              gutterDiv = window.document.createElement("div");
+              gutterDiv.setAttribute("id", "code-annotation-line-highlight-gutter");
+              gutterDiv.style.position = 'absolute';
+              const codeCell = window.document.getElementById(targetCell);
+              const gutter = codeCell.querySelector('.code-annotation-gutter');
+              gutter.appendChild(gutterDiv);
+            }
+            gutterDiv.style.top = top - 2 + "px";
+            gutterDiv.style.height = height + 4 + "px";
+          }
+          selectedAnnoteEl = annoteEl;
+        }
+      };
+      const unselectCodeLines = () => {
+        const elementsIds = ["code-annotation-line-highlight", "code-annotation-line-highlight-gutter"];
+        elementsIds.forEach((elId) => {
+          const div = window.document.getElementById(elId);
+          if (div) {
+            div.remove();
+          }
+        });
+        selectedAnnoteEl = undefined;
+      };
+        // Handle positioning of the toggle
+    window.addEventListener(
+      "resize",
+      throttle(() => {
+        elRect = undefined;
+        if (selectedAnnoteEl) {
+          selectCodeLines(selectedAnnoteEl);
+        }
+      }, 10)
+    );
+    function throttle(fn, ms) {
+    let throttle = false;
+    let timer;
+      return (...args) => {
+        if(!throttle) { // first call gets through
+            fn.apply(this, args);
+            throttle = true;
+        } else { // all the others get throttled
+            if(timer) clearTimeout(timer); // cancel #2
+            timer = setTimeout(() => {
+              fn.apply(this, args);
+              timer = throttle = false;
+            }, ms);
+        }
+      };
+    }
+      // Attach click handler to the DT
+      const annoteDls = window.document.querySelectorAll('dt[data-target-cell]');
+      for (const annoteDlNode of annoteDls) {
+        annoteDlNode.addEventListener('click', (event) => {
+          const clickedEl = event.target;
+          if (clickedEl !== selectedAnnoteEl) {
+            unselectCodeLines();
+            const activeEl = window.document.querySelector('dt[data-target-cell].code-annotation-active');
+            if (activeEl) {
+              activeEl.classList.remove('code-annotation-active');
+            }
+            selectCodeLines(clickedEl);
+            clickedEl.classList.add('code-annotation-active');
+          } else {
+            // Unselect the line
+            unselectCodeLines();
+            clickedEl.classList.remove('code-annotation-active');
+          }
+        });
+      }
   const findCites = (el) => {
     const parentEl = el.parentElement;
     if (parentEl) {
@@ -1156,6 +1468,7 @@ window.document.addEventListener("DOMContentLoaded", function (event) {
 });
 </script>
 </div> <!-- /content -->
+
 
 
 
